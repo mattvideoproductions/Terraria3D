@@ -1,7 +1,7 @@
-# Terraria 3D (v0.5.4)
+# Terraria 3D (v0.5.5)
 
 A Luma3DS 3GX plugin that adds real per-layer stereoscopic 3D to Terraria on the
-Nintendo 3DS.
+Nintendo 3DS (New 3DS / New 2DS XL only).
 
 ## Features
 
@@ -11,6 +11,8 @@ Nintendo 3DS.
 - C-stick aiming (see Controls)
 - Cheat console and Creative mode menu
 - Optional fake-OLED colour booster
+- Tap to move items (Vita style) in the inventory and chests, including across tabs
+- "Held item hint" toggle: the on-screen note shown while an item is carried to another tab (on by default)
 
 ## Controls
 
@@ -48,6 +50,6 @@ Built with CTRPluginFramework, Luma3DS and devkitPro.
 
 ## Credits
 
-Built with Claude (Anthropic) as an AI-driven reverse-engineering project. Uses CTRPluginFramework and Luma3DS's plugin loader.
+Developed by Claude (Anthropic) as an AI-driven reverse-engineering project, with mattvideoproductions directing and testing on hardware. Uses CTRPluginFramework and Luma3DS's plugin loader.
 
 Not affiliated with Re-Logic, 505 Games or Nintendo. No game files are included; you need your own copy.

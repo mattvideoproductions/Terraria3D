@@ -148,6 +148,7 @@ namespace t3d::inventory_tap
             return ok;
         }
         volatile bool      s_enabled = true;
+        volatile bool      s_hintEnabled = true;
         bool               s_installed = false;
 
         // ---- log queue: filled on the game thread, written by the plugin thread ----
@@ -582,7 +583,8 @@ namespace t3d::inventory_tap
         if (s_pendNotify)
         {
             s_pendNotify = false;
-            CTRPluginFramework::OSD::Notify("Item still in hand: tap a slot to put it there (B cancels)");
+            if (s_hintEnabled)
+                CTRPluginFramework::OSD::Notify("Item still in hand: tap a slot to put it there (B cancels)");
         }
         while (s_logTail != s_logHead)
         {
@@ -601,5 +603,6 @@ namespace t3d::inventory_tap
 
     void SetEnabled(bool on) { s_enabled = on; }
     bool Enabled()           { return s_enabled; }
+    void SetHintEnabled(bool on) { s_hintEnabled = on; }
     bool Installed()         { return s_installed; }
 }

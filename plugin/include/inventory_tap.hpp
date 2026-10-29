@@ -20,6 +20,9 @@ namespace t3d::inventory_tap
     void    SetEnabled(bool on);
     bool    Enabled();
 
+    // Menu toggle: the "Item still in hand" note after a tab switch (v0.5.5).
+    void    SetHintEnabled(bool on);
+
     // True when all hooks are in place.
     bool    Installed();
 

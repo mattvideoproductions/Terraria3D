@@ -1,4 +1,4 @@
-# Terraria 3D mod v0.5.4: install guide
+# Terraria 3D mod v0.5.5: install guide
 
 Terraria 3D is a Luma3DS plugin (a `.3gx` file) that adds real stereoscopic 3D to
 Terraria on the Nintendo 3DS. This guide takes about five minutes.

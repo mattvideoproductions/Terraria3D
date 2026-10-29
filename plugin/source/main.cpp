@@ -17,7 +17,7 @@
 #include "ui_theme.hpp"
 #include "version_check.hpp"
 
-#define T3D_VERSION_STR "0.5.4"
+#define T3D_VERSION_STR "0.5.5"
 #define T3D_NAME        "Terraria 3D mod v" T3D_VERSION_STR
 
 namespace CTRPluginFramework
@@ -51,7 +51,7 @@ namespace CTRPluginFramework
     static void NoOp(MenuEntry *) {}
 
     static MenuEntry *e_stereo, *e_perLayer, *e_invert, *e_stereoDebug, *e_fps, *e_slider, *e_perfLog;
-    static MenuEntry *e_invTap;
+    static MenuEntry *e_invTap, *e_invHint;
     static MenuEntry *e_snapPx, *e_edgeFill, *e_bgCull, *e_bgViewport, *e_bgMerge, *e_bgFastLight, *e_noCatchUp;
     static u32 s_statsSeq = 0;
     static std::string s_bgStats = "bg -";
@@ -70,6 +70,7 @@ namespace CTRPluginFramework
         t3d::perf_fixes::SetFastLighting(e_bgFastLight->IsActivated());
         t3d::perf_fixes::SetNoCatchUp(e_noCatchUp->IsActivated());
         t3d::inventory_tap::SetEnabled(e_invTap->IsActivated());
+        t3d::inventory_tap::SetHintEnabled(e_invHint->IsActivated());
         t3d::inventory_tap::FlushLog();   // tap action lines queued on the game thread
 
         if (e_perfLog->IsActivated())
@@ -312,6 +313,11 @@ namespace CTRPluginFramework
                                               "tap another slot to place, merge or swap it. Tap the\n"
                                               "same slot or press B to put it back. Drag still works."));
         e_invTap->Enable();
+        menu->Append(e_invHint = new MenuEntry("Held item hint", NoOp,
+                                               "Shows the note \"Item still in hand: tap a slot to put it\n"
+                                               "there\" when you carry an item to another inventory tab.\n"
+                                               "Off = no note. Tap to move works either way."));
+        e_invHint->Enable();
 
         // ---- Zoom, cheats, creative ----
         t3d::features::BuildMenu(*menu);
