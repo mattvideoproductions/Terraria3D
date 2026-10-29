@@ -1,0 +1,20 @@
+# build outputs
+build/
+*.elf
+*.o
+*.d
+*.map
+*.sym
+*.3gx
+# keep the reference release binary
+!releases/**/*.3gx
+# game data (never commit)
+*.cia
+*.3ds
+*.cxi
+*.otx
+*.bcfnt
+code.bin
+romfs/
+exefs/
+crashdumps/
