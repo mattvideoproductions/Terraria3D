@@ -17,7 +17,7 @@
 #include "ui_theme.hpp"
 #include "version_check.hpp"
 
-#define T3D_VERSION_STR "0.5.3"
+#define T3D_VERSION_STR "0.5.4"
 #define T3D_NAME        "Terraria 3D mod v" T3D_VERSION_STR
 
 namespace CTRPluginFramework
@@ -230,14 +230,19 @@ namespace CTRPluginFramework
     // ---------------------------------------------------------------------
     int main(void)
     {
-        PluginMenu *menu = new PluginMenu("Terraria 3D mod", 0, 3, 0,
+        PluginMenu *menu = new PluginMenu("Terraria 3D mod", 0, 5, 4,
             "Terraria 3D mod v" T3D_VERSION_STR "\n"
             "Stereo 3D, 2x zoom, cheats and creative mode\nfor Terraria 3DS USA v5.6.0.");
         menu->SynchronizeWithFrame(true);
         menu->OnOpening = []() -> bool
         {
             t3d::stereo::present::SyncRightBuffersForMenu();
+            t3d::features::OnMenuOpening();
             return true;
+        };
+        menu->OnClosing = []()
+        {
+            t3d::features::OnMenuClosing();
         };
 
         t3d::perf::Log("---- " T3D_NAME " started; version check: " +

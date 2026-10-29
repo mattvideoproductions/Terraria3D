@@ -142,7 +142,11 @@ namespace t3d::features
         constexpr u32 kKeyZR           = 0x8000;
         constexpr float kStickFull     = 105.0f;
         constexpr float kAimDeadzone   = 0.25f;
-        constexpr float kAutoUseAt     = 0.85f;      // "pushed hard"
+        constexpr float kAutoUseAt     = 0.85f;      // "pushed hard" (weapons, other items, Precise tools)
+        // Auto-tunnel tools start digging at a smaller push (v0.5.4, Matt
+        // 14:00-14:41: "60-something percent of the way there" was too far).
+        constexpr float kAutoUseTunnelAt = 0.50f;
+        constexpr float kAutoUseHyst   = 0.05f;      // keep swinging until the push drops this far below
         constexpr float kJitterDz      = 10.0f;      // raw stick units: below this the stick is centred
 
         // ---- control scheme (v0.5 notes in notes/aiming.md §6) ----
@@ -182,16 +186,23 @@ namespace t3d::features
         constexpr u8  kPageBuildView   = 0, kPageMiniInv = 9;
 
         enum CstickMode { kCstickOff = 0, kCstickAim = 1, kCstickAimAuto = 2 };
-        enum TrigAction { kTrigDefault = 0, kTrigGrapple = 1, kTrigJump = 2, kTrigUse = 3 };
-        enum Preset     { kPresetNew3DS = 0, kPresetOld3DS = 1, kPresetStock = 2, kPresetLefty = 3, kPresetCount };
+        enum TrigAction { kTrigDefault = 0, kTrigGrapple = 1, kTrigJump = 2, kTrigUse = 3, kTrigStyle = 4 };
+        enum Preset     { kPresetNew3DS = 0, kPresetOld3DS = 1, kPresetStock = 2, kPresetLefty = 3,
+                          kPresetNew3DSGrapple = 4, kPresetCount };
 
         hook::FunctionHook s_padHook, s_aimHook, s_itemCheckHook, s_buttonSetHook;
         volatile bool s_buttonSetHooked = false;        // private grapple button available
         volatile bool s_modGrappleDown = false;         // private grapple button this frame
         bool          s_trigOwned[2] = {};              // ZL, ZR press belongs to the mod until released
+        bool          s_trigPrevRaw[2] = {};            // ZL, ZR raw state last tick (press edge)
+        bool          s_autoUsing = false;              // hard-push auto-use active last tick (hysteresis)
+        // D-pad walking (v0.5.4, off by default): in play the D-pad drives the
+        // circle pad value and is hidden from the game (no D-pad cursor).
+        volatile bool s_dpadWalk = false;
+        bool          s_dpadWalking = false;
         volatile int  s_cstickMode = kCstickAimAuto;
         volatile bool s_padInteractOnly = false;
-        volatile int  s_zlAction = kTrigGrapple, s_zrAction = kTrigUse;
+        volatile int  s_zlAction = kTrigStyle, s_zrAction = kTrigUse;
         volatile int  s_sensitivity = 1;                // 0 low, 1 normal, 2 high
         volatile int  s_smoothing = 2;                  // 0 off, 1 light, 2 medium, 3 strong
         volatile int  s_preset = -1;                    // -1 = not chosen yet (auto-detect)
@@ -234,8 +245,8 @@ namespace t3d::features
         // it. Cursor::Draw (0x264C18) draws the "crosshair" at C+8/+C whenever
         // C+5 is set, and every tick the player controls ask GetAimPoint, so
         // keeping C+4/C+5 set keeps the crosshair on the held point.
-        // Quick toggle in play: hold Y, press ZR (ZR is then hidden from the
-        // game until released; see notes/aiming.md §6.2).
+        // Quick switch in play: ZL in the New 3DS preset (v0.5.4; the v0.5.2
+        // Y+ZR combo is gone, it collided with mining). notes/aiming.md §6.4.
         enum CstickStyle { kStyleSpring = 0, kStyleCursor = 1 };
         constexpr float kHoldDeadzone  = 0.15f;
         // +50% after the 2026-10-28 hardware test ("up it a decent
@@ -276,11 +287,19 @@ namespace t3d::features
         volatile bool s_smartHooked = false;            // smart-cursor hook installed (tunnel needs it)
         volatile float s_tunnelDX = 0, s_tunnelDY = 0;  // unit direction, world (+y down)
         constexpr u32 kFnSmartCursor  = 0x00263B98;     // E92D41F0, (float out[2], Cursor*, float dir[2]); sole caller 0x264AB4
+        // Plugin menu closed -> the game opens its pause page (seen in Azahar
+        // 2026-10-29: page 9 -> 6 after Select). Resume once if the menu was
+        // opened from play: one A press on the default "Return to Game".
+        volatile bool s_menuFromPlay = false;
+        volatile u32  s_resumeWindow = 0;       // ticks left to see the pause page after a close
+        constexpr u32 kResumeTicks   = 45;
+        constexpr u8  kPagePause     = 6;
+        constexpr u32 kKeyA          = 0x0001;
+        u32           s_resumePress  = 0;       // ticks of injected A left
         bool          s_holdWasInWorld = false;
         u32           s_holdPlayer = 0;
         u32           s_padTick = 0, s_holdSeenTick = ~0u;
         bool          s_dpadHeld = false;
-        bool          s_comboLatch = false, s_prevZrRaw = false;
 
         // The game's reach box around the player centre (FUN_00263f9c):
         // x +-reachX, y -(reachY+8)..+(reachY-8). Read the live literals so the
@@ -313,7 +332,8 @@ namespace t3d::features
 
         bool CirclePadMoving()
         {
-            return Controller::IsKeyDown(Key::CPadLeft) || Controller::IsKeyDown(Key::CPadRight)
+            return s_dpadWalking
+                || Controller::IsKeyDown(Key::CPadLeft) || Controller::IsKeyDown(Key::CPadRight)
                 || Controller::IsKeyDown(Key::CPadUp)   || Controller::IsKeyDown(Key::CPadDown);
         }
         u32           s_lastWorldDraws = 0;
@@ -460,6 +480,15 @@ namespace t3d::features
             return HeldKind::Other;
         }
 
+        // ZL "cycle C-stick style" (game thread). Only Spring and Cursor exist:
+        // Spring is the absolute style (push = point in the reach box).
+        void CycleStyle()
+        {
+            s_cstickStyle = s_cstickStyle == kStyleCursor ? kStyleSpring : kStyleCursor;
+            ResetHold();
+            s_styleNotify = true;
+        }
+
         bool Hooked_PadReadLatest(void *reader, u8 *status)
         {
             const bool ok = hook::FunctionHook::CallOriginal<bool>(reader, status);
@@ -501,6 +530,55 @@ namespace t3d::features
             u32 &up   = *reinterpret_cast<u32 *>(status + 0x10);
             const bool physY = (held & kKeyY) != 0;     // the real Y, before any injected use
 
+            // Auto-resume after the plugin menu (see s_menuFromPlay): A held
+            // for 2 ticks, "down" on the first, only on the pause page.
+            if (s_resumePress)
+            {
+                // Stop as soon as the pause page is gone (no A reaches play).
+                if ((U8(kUiGuard) & 1) && U8(kUiPage) == kPagePause)
+                {
+                    held |= kKeyA;
+                    if (s_resumePress == 2)
+                        down |= kKeyA;
+                    s_resumePress--;
+                }
+                else
+                    s_resumePress = 0;
+            }
+            else if (s_resumeWindow)
+            {
+                s_resumeWindow = s_resumeWindow - 1;
+                if ((U8(kUiGuard) & 1) && U8(kUiPage) == kPagePause && U8(kUiPageTarget) == kPagePause
+                    && (held & kKeyA) == 0)
+                {
+                    s_resumeWindow = 0;
+                    s_resumePress = 2;
+                }
+            }
+
+            // D-pad walking: the D-pad becomes the circle pad (status +0/+2,
+            // about +-105, up = +) while the circle pad itself is centred, and
+            // the D-pad bits are hidden from the game (no D-pad cursor). Play
+            // pages only: menus keep the D-pad.
+            s_dpadWalking = false;
+            if (s_dpadWalk && inPlay)
+            {
+                const u32 d = held & kKeyDpad;
+                s16 &px = *reinterpret_cast<s16 *>(status + 0);
+                s16 &py = *reinterpret_cast<s16 *>(status + 2);
+                const bool padIdle = px * px + py * py < 20 * 20;
+                if (d && padIdle)
+                {
+                    px = static_cast<s16>((d & 0x10 ? 105 : 0) - (d & 0x20 ? 105 : 0));   // right / left
+                    py = static_cast<s16>((d & 0x40 ? 105 : 0) - (d & 0x80 ? 105 : 0));   // up / down
+                    s_dpadWalking = true;
+                }
+                // Release edges pass: a D-pad pressed on a menu page and let
+                // go in play still ends there.
+                held &= ~kKeyDpad;
+                down &= ~kKeyDpad;
+            }
+
             // Stock Y: a Y press with the C-stick centred hands the aim back
             // to the game's smart cursor until Y is released (Spring: no
             // "keep the aimed tile" lock; Cursor: the crosshair hides).
@@ -518,24 +596,6 @@ namespace t3d::features
                 s_prevPhysY = physY;
             }
 
-            // C-stick style quick toggle: hold Y, then press ZR (in play).
-            // Y and the default ZR action are the same "use", so the combo
-            // adds nothing the game would act on, and the ZR press is hidden
-            // from the game and the mod until it is released (whatever ZR is
-            // mapped to: no stray inventory, grapple or jump).
-            const bool zrRaw = ((held | (s_irActive ? s_irKeys : 0u)) & kKeyZR) != 0;
-            const bool comboReleased = s_comboLatch && !zrRaw;
-            if (!zrRaw)
-                s_comboLatch = false;
-            else if (!s_prevZrRaw && inPlay && (held & kKeyY))
-            {
-                s_comboLatch = true;
-                s_cstickStyle = s_cstickStyle == kStyleCursor ? kStyleSpring : kStyleCursor;
-                ResetHold();
-                s_styleNotify = true;
-            }
-            s_prevZrRaw = zrRaw;
-
             const int act[2] = { s_zlAction, s_zrAction };
             const u32 bit[2] = { kKeyZL, kKeyZR };
             const bool remapAny = act[0] != kTrigDefault || act[1] != kTrigDefault;
@@ -546,7 +606,9 @@ namespace t3d::features
             ApplySchemeOverrides(onPlayPage);
             for (int i = 0; i < 2; i++)
             {
-                const bool rawHeld = (raw & bit[i]) != 0 && !(i == 1 && s_comboLatch);
+                const bool rawHeld = (raw & bit[i]) != 0;
+                const bool pressEdge = rawHeld && !s_trigPrevRaw[i];
+                s_trigPrevRaw[i] = rawHeld;
                 if (act[i] == kTrigDefault)
                 {
                     if (rawHeld)
@@ -570,6 +632,10 @@ namespace t3d::features
                 }
                 else if (rawHeld)
                     held |= bit[i];         // menus keep the stock trigger (ir:rst if the game lost it)
+
+                // Cycle the C-stick style: one step per press made in play.
+                if (act[i] == kTrigStyle && pressEdge && inPlay)
+                    CycleStyle();
 
                 if (inPlay && rawHeld)
                 {
@@ -596,12 +662,6 @@ namespace t3d::features
                     s_trigHeldFrames[i] = 0;
             }
             s_modGrappleDown = modGrapple;
-            if (s_comboLatch || comboReleased)
-            {
-                held &= ~kKeyZR;
-                down &= ~kKeyZR;
-                up   &= ~kKeyZR;
-            }
 
             // Cursor style: move the held aim (game thread, once per tick).
             // Reset on entering a world or a new local player, or on request.
@@ -637,6 +697,12 @@ namespace t3d::features
             }
 
             const HeldKind kind = inPlay ? HeldItemKind(player) : HeldKind::Other;
+            // Auto-tunnel: a tool on the C-stick steers the game's smart dig
+            // (Cursor::Update runs after this read, in the same tick). Precise
+            // never tunnels: it mines the aimed tile only.
+            const bool tunnelTool = s_cstickMode != kCstickOff && inPlay && s_cstickStyle != kStyleCursor
+                                 && s_toolMining == kToolTunnel && s_smartHooked && kind == HeldKind::Tool;
+            bool autoUse = false;
             if (s_cstickMode != kCstickOff)
             {
                 // The stock C-stick only pans the camera; aiming replaces that.
@@ -645,8 +711,11 @@ namespace t3d::features
 
                 // Twin-stick: a hard push holds Y for the game, only in play,
                 // and only for weapons and tools: never places blocks or uses
-                // up consumables.
-                if (s_cstickMode == kCstickAimAuto && inPlay && smag > kAutoUseAt)
+                // up consumables. Auto-tunnel tools start at a smaller push.
+                float at = tunnelTool ? kAutoUseTunnelAt : kAutoUseAt;
+                if (s_autoUsing)
+                    at -= kAutoUseHyst;
+                if (s_cstickMode == kCstickAimAuto && inPlay && smag > at)
                 {
                     const u32 item = player + kPlayerInventory
                                    + *reinterpret_cast<volatile s8 *>(player + kPlayerSelected) * 0x84;
@@ -655,15 +724,14 @@ namespace t3d::features
                     {
                         held |= kKeyY;
                         modUse = true;
+                        autoUse = true;
                     }
                 }
             }
+            s_autoUsing = autoUse;
 
-            // Auto-tunnel: a tool on the C-stick steers the game's smart dig
-            // (Cursor::Update runs after this read, in the same tick).
             bool tunnel = false;
-            if (s_cstickMode != kCstickOff && inPlay && s_cstickStyle != kStyleCursor
-                && s_toolMining == kToolTunnel && s_smartHooked && kind == HeldKind::Tool && smag > kAimDeadzone)
+            if (tunnelTool && smag > kAimDeadzone)
             {
                 const float len = __builtin_sqrtf(snx * snx + sny * sny);
                 s_tunnelDX = snx / len;
@@ -905,14 +973,14 @@ namespace t3d::features
         MenuEntry *e_zoomHotkey, *e_consoleHotkey;
         MenuEntry *e_godmode, *e_noSpawns, *e_fullbright, *e_infBuckets, *e_debugTools;
         MenuEntry *e_infItems, *e_noFall, *e_instantMine, *e_reach, *e_flight, *e_freezeTime;
-        MenuEntry *e_padInteract, *e_cstickDebug;
+        MenuEntry *e_padInteract, *e_cstickDebug, *e_dpadWalk;
 
         const char *const kCstickModeNames[] = { "Off (stock camera pan)", "Aim only (Y uses)",
                                                  "Aim + auto-use on hard push" };
 
         void CstickModeMenuFunc(MenuEntry *)
         {
-            Keyboard kb(Utils::Format("C-stick mode. Current: %s", kCstickModeNames[s_cstickMode]),
+            Keyboard kb(Utils::Format("C-stick aiming. Current: %s", kCstickModeNames[s_cstickMode]),
                         { kCstickModeNames[0], kCstickModeNames[1], kCstickModeNames[2] });
             const int choice = kb.Open();
             if (choice >= 0 && choice < 3)
@@ -923,17 +991,19 @@ namespace t3d::features
         }
 
         const char *const kCstickStyleNames[] = { "Spring (absolute)", "Cursor (holds position)" };
+        const char *const kCstickStyleShort[] = { "Spring", "Cursor" };
         const char *const kCursorSpeedNames[] = { "Slow", "Normal", "Fast" };
 
         void CstickStyleMenuFunc(MenuEntry *)
         {
-            Keyboard kb(Utils::Format("C-stick style. Current: %s\n\n"
-                                      "Spring: the push sets the aim, letting go\n"
-                                      "  returns to the auto-cursor. Tools auto-tunnel.\n"
+            Keyboard kb(Utils::Format("C-stick STYLE (how the aim moves). Current: %s\n\n"
+                                      "Spring: the push sets the aim (absolute), letting\n"
+                                      "  go returns to the auto-cursor.\n"
                                       "Cursor: the stick moves the aim like a mouse\n"
                                       "  and it stays where you leave it (it hides\n"
                                       "  while you walk). Tools mine that one spot.\n"
-                                      "In play: hold Y and press ZR to switch.",
+                                      "In play: ZL switches (New 3DS preset).\n"
+                                      "Not the same as \"C-stick tool mode\".",
                                       kCstickStyleNames[s_cstickStyle == kStyleCursor]),
                         { kCstickStyleNames[0], kCstickStyleNames[1] });
             const int choice = kb.Open();
@@ -957,7 +1027,7 @@ namespace t3d::features
 
         const char *const kCursorHideNames[] = { "When walking", "When walking or after 3 s", "Never" };
         const char *const kYButtonNames[]    = { "Stock (smart cursor)", "Uses the C-stick aim" };
-        const char *const kToolMiningNames[] = { "Auto-tunnel (smart dig)", "Precise (aim point)" };
+        const char *const kToolMiningNames[] = { "Auto-tunnel (smart dig)", "Precise (one block, the aimed tile)" };
 
         void CursorHideMenuFunc(MenuEntry *)
         {
@@ -986,14 +1056,16 @@ namespace t3d::features
 
         void ToolMiningMenuFunc(MenuEntry *)
         {
-            Keyboard kb(Utils::Format("C-stick with a pickaxe, axe or hammer\n"
-                                      "(Spring style). Current: %s\n\n"
+            Keyboard kb(Utils::Format("C-stick TOOL MODE (pickaxe, axe, hammer;\n"
+                                      "Spring style). Current: %s\n\n"
                                       "Auto-tunnel: push the C-stick towards the\n"
-                                      "  rock; the game's smart dig mines a tunnel\n"
-                                      "  your height, block after block, within\n"
-                                      "  the tool's own reach.\n"
-                                      "Precise: mine the exact aimed tile.\n"
-                                      "Cursor style always mines its held spot.",
+                                      "  rock (about half way); the game's smart dig\n"
+                                      "  mines a tunnel your height, block after\n"
+                                      "  block, within the tool's own reach.\n"
+                                      "Precise: mine only the aimed tile. Never\n"
+                                      "  tunnels.\n"
+                                      "Cursor style always mines its held spot.\n"
+                                      "Not the same as \"C-stick style\" (ZL).",
                                       kToolMiningNames[s_toolMining]),
                         { kToolMiningNames[0], kToolMiningNames[1] });
             const int choice = kb.Open();
@@ -1009,14 +1081,19 @@ namespace t3d::features
             bool interactOnly;
         };
         const PresetDef kPresets[kPresetCount] = {
-            { "New 3DS (C-stick aim)",     kCstickAimAuto, kTrigGrapple, kTrigUse,     1, 2, false },
+            // v0.5.4: ZL cycles the C-stick style; grapple is back on the
+            // game's own button (A) in this preset.
+            { "New 3DS (C-stick aim)",     kCstickAimAuto, kTrigStyle,   kTrigUse,     1, 2, false },
             // Old 3DS: no ZL/ZR without a Circle Pad Pro, so grapple stays on A
             // (moving it to ZL would leave no grapple button at all).
             { "Old 3DS (D-pad + touch)",   kCstickOff,     kTrigDefault, kTrigDefault, 1, 2, false },
             { "Stock (game controls)",     kCstickOff,     kTrigDefault, kTrigDefault, 1, 2, false },
             { "Lefty (ZL use, ZR grapple)",kCstickAimAuto, kTrigUse,     kTrigGrapple, 1, 2, false },
+            // The v0.5.3 New 3DS layout.
+            { "New 3DS, ZL grapple",       kCstickAimAuto, kTrigGrapple, kTrigUse,     1, 2, false },
         };
-        const char *const kTrigNames[] = { "Off (game default)", "Grapple", "Jump", "Use item / mine / place" };
+        const char *const kTrigNames[] = { "Off (game default)", "Grapple", "Jump", "Use item / mine / place",
+                                           "Switch C-stick style" };
         const char *const kSensNames[] = { "Low", "Normal", "High" };
         const char *const kSmoothNames[] = { "Off", "Light", "Medium", "Strong" };
 
@@ -1052,12 +1129,15 @@ namespace t3d::features
         {
             const char *cur = s_preset >= 0 && s_preset < kPresetCount ? kPresets[s_preset].name : "custom";
             Keyboard kb(Utils::Format("Control preset. Current: %s\n\n"
-                                      "New 3DS: C-stick aims, ZR uses, ZL grapples.\n"
+                                      "New 3DS: C-stick aims, ZR uses, ZL switches\n"
+                                      "  the C-stick style, A grapples (stock).\n"
                                       "Old 3DS: D-pad cursor + touch, A grapples\n"
                                       "  (Circle Pad Pro: set ZL/ZR below).\n"
                                       "Stock: the game's own controls.\n"
-                                      "Lefty: ZL uses, ZR grapples.", cur),
-                        { kPresets[0].name, kPresets[1].name, kPresets[2].name, kPresets[3].name });
+                                      "Lefty: ZL uses, ZR grapples.\n"
+                                      "New 3DS, ZL grapple: the v0.5.3 layout.", cur),
+                        { kPresets[0].name, kPresets[1].name, kPresets[2].name, kPresets[3].name,
+                          kPresets[4].name });
             const int choice = kb.Open();
             if (choice >= 0 && choice < kPresetCount)
             {
@@ -1070,10 +1150,10 @@ namespace t3d::features
         {
             Keyboard kb(Utils::Format("%s button (in play only; menus keep the\n"
                                       "game's own %s). Current: %s", button, button, kTrigNames[current]),
-                        { kTrigNames[1], kTrigNames[2], kTrigNames[3], kTrigNames[0] });
+                        { kTrigNames[1], kTrigNames[2], kTrigNames[3], kTrigNames[4], kTrigNames[0] });
             const int choice = kb.Open();
-            static const int kMap[] = { kTrigGrapple, kTrigJump, kTrigUse, kTrigDefault };
-            return choice >= 0 && choice < 4 ? kMap[choice] : -1;
+            static const int kMap[] = { kTrigGrapple, kTrigJump, kTrigUse, kTrigStyle, kTrigDefault };
+            return choice >= 0 && choice < 5 ? kMap[choice] : -1;
         }
 
         void ZlMenuFunc(MenuEntry *)
@@ -1083,6 +1163,8 @@ namespace t3d::features
                 return;
             if (a == kTrigGrapple && s_zrAction == kTrigGrapple)
                 s_zrAction = kTrigDefault;      // one grapple button only
+            if (a == kTrigStyle && s_zrAction == kTrigStyle)
+                s_zrAction = kTrigDefault;
             s_zlAction = a;
             s_preset = -2;                      // custom
         }
@@ -1093,6 +1175,8 @@ namespace t3d::features
             if (a < 0)
                 return;
             if (a == kTrigGrapple && s_zlAction == kTrigGrapple)
+                s_zlAction = kTrigDefault;
+            if (a == kTrigStyle && s_zlAction == kTrigStyle)
                 s_zlAction = kTrigDefault;
             s_zrAction = a;
             s_preset = -2;
@@ -1242,15 +1326,16 @@ namespace t3d::features
         s_flight     = e_flight->IsActivated();
         s_freezeTime = e_freezeTime->IsActivated();
         s_padInteractOnly = e_padInteract->IsActivated();
+        s_dpadWalk = e_dpadWalk && e_dpadWalk->IsActivated();
 
         // OSD for the in-game style toggle (formatted here, not on the game thread)
         if (s_styleNotify)
         {
             s_styleNotify = false;
             const bool cursor = s_cstickStyle == kStyleCursor;
-            OSD::Notify(Utils::Format("C-stick: %s%s", kCstickStyleNames[cursor ? 1 : 0],
-                                      s_cstickMode == kCstickOff ? " (aim is off)" : ""));
-            perf::Log(std::string("C-stick style (Y+ZR): ") + kCstickStyleNames[cursor ? 1 : 0]);
+            OSD::Notify(Utils::Format("C-stick style: %s%s", kCstickStyleShort[cursor ? 1 : 0],
+                                      s_cstickMode == kCstickOff ? " (aiming is off)" : ""));
+            perf::Log(std::string("C-stick style (button): ") + kCstickStyleNames[cursor ? 1 : 0]);
         }
 
         // ir:rst: on hardware (v0.4.1 playtest) the game's emulated Circle Pad
@@ -1384,6 +1469,24 @@ namespace t3d::features
 
     bool Zoom2x() { return s_zoom2x; }
 
+    void OnMenuOpening()
+    {
+        s_resumeWindow = 0;
+        s_resumePress = 0;
+        // The current page only: the Select press that opens the menu can
+        // already have queued the pause (target page 6) by now.
+        const u8 page = U8(kUiPage);
+        s_menuFromPlay = (U8(kUiGuard) & 1) && (page == kPageMiniInv || page == kPageBuildView)
+                      && s_ticksSinceWorldDraw < kWorldDrawGraceTicks;
+    }
+
+    void OnMenuClosing()
+    {
+        if (s_menuFromPlay)
+            s_resumeWindow = kResumeTicks;
+        s_menuFromPlay = false;
+    }
+
     void BuildMenu(PluginMenu &menu)
     {
         // ---- Zoom ----
@@ -1400,9 +1503,10 @@ namespace t3d::features
                                        "Stock, or Lefty. Picked automatically on first boot\n"
                                        "from the console model."));
         controls->Append(new MenuEntry("ZL button", nullptr, ZlMenuFunc,
-                                       "Grapple (default), Jump, Use item, or the game's own\n"
-                                       "ZL (build view). While playing the game never sees a\n"
-                                       "remapped ZL; menus keep their stock ZL."));
+                                       "Switch C-stick style (default: Spring <-> Cursor),\n"
+                                       "Grapple, Jump, Use item, or the game's own ZL (build\n"
+                                       "view). While playing the game never sees a remapped ZL;\n"
+                                       "menus keep their stock ZL."));
         controls->Append(new MenuEntry("ZR button", nullptr, ZrMenuFunc,
                                        "Use item / mine / place at the C-stick aim (default),\n"
                                        "Grapple, Jump, or the game's own ZR (inventory). Menus\n"
@@ -1412,21 +1516,22 @@ namespace t3d::features
                                        "reaches the edge of your reach."));
         controls->Append(new MenuEntry("C-stick smoothing", nullptr, SmoothMenuFunc,
                                        "Steadies a jittery C-stick. Medium is the default."));
-        controls->Append(new MenuEntry("C-stick mode", nullptr, CstickModeMenuFunc,
+        controls->Append(new MenuEntry("C-stick aiming", nullptr, CstickModeMenuFunc,
                                        "The C-stick aims weapons, tools, the grapple and blocks.\n"
                                        "Push a little to aim close, all the way for the edge of\n"
                                        "your reach. Auto-use: a hard push also swings weapons and\n"
                                        "tools (never places blocks or uses consumables)."));
         controls->Append(new MenuEntry("C-stick style", nullptr, CstickStyleMenuFunc,
-                                       "Spring (default): the push sets the aim; let go and the\n"
-                                       "auto-cursor is back. Tools auto-tunnel (see below).\n"
+                                       "How the aim moves. Spring (default, absolute): the push\n"
+                                       "sets the aim; let go and the auto-cursor is back.\n"
                                        "Cursor: the stick moves the aim like a mouse and it stays\n"
                                        "put, moving with you; tools mine that spot.\n"
-                                       "In play: hold Y and press ZR to switch."));
-        controls->Append(new MenuEntry("C-stick tool mining", nullptr, ToolMiningMenuFunc,
-                                       "Auto-tunnel (default): a pickaxe pushed with the C-stick\n"
-                                       "digs a tunnel your height in that direction (the game's\n"
-                                       "smart dig). Precise: mine the aimed tile. Spring only."));
+                                       "In play: ZL switches (New 3DS preset)."));
+        controls->Append(new MenuEntry("C-stick tool mode", nullptr, ToolMiningMenuFunc,
+                                       "What a pickaxe/axe/hammer does on the C-stick (Spring).\n"
+                                       "Auto-tunnel (default): push about half way and it digs a\n"
+                                       "tunnel your height that way (the game's smart dig).\n"
+                                       "Precise: only the aimed tile, never a tunnel."));
         controls->Append(new MenuEntry("Y button", nullptr, YButtonMenuFunc,
                                        "Stock (default): Y uses the item at the game's smart\n"
                                        "cursor while the C-stick is centred. Or: Y uses the item\n"
@@ -1443,6 +1548,10 @@ namespace t3d::features
                                                        "and tables, but no longer mines or builds. Aim those with\n"
                                                        "the C-stick, the D-pad cursor or touch. Off by default\n"
                                                        "(it also stops an axe on Y chopping trees)."));
+        controls->Append(e_dpadWalk = new MenuEntry("D-pad walking", NoOp,
+                                                    "The D-pad moves your character like the circle pad\n"
+                                                    "while playing (menus keep the D-pad). Replaces the\n"
+                                                    "D-pad cursor. Off by default."));
         controls->Append(e_cstickDebug = new MenuEntry("C-stick debug (bottom screen)", NoOp,
                                                        "Raw C-stick values from the game and from ir:rst."));
         menu.Append(controls);

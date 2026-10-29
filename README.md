@@ -1,4 +1,4 @@
-# Terraria 3D (v0.5.3)
+# Terraria 3D (v0.5.4)
 
 A Luma3DS 3GX plugin that adds real per-layer stereoscopic 3D to Terraria on the
 Nintendo 3DS.
@@ -15,11 +15,15 @@ Nintendo 3DS.
 ## Controls
 
 - **ZR**: use / mine / place at the C-stick aim point
-- **ZL**: grappling hook
+- **ZL**: switch the C-stick style (Spring / Cursor); a short notice names the style
+- **A**: interact and grappling hook (stock). "ZL = grapple" is still in the menu
+  (ZL button, or the "New 3DS, ZL grapple" preset)
 - **Y**: stock behaviour (smart-cursor stock/break when the C-stick is centred)
-- **C-stick**: aim; with a pickaxe, axe or hammer, pushing it auto-tunnels in that direction
-- **Y + ZR**: toggle the C-stick style (Spring / Cursor)
-- **Inventory**: tap to move items (tap a stack to pick it up, tap a slot to place, swap or merge)
+- **C-stick**: aim; with a pickaxe, axe or hammer, a half push auto-tunnels in that
+  direction ("C-stick tool mode": Auto-tunnel or Precise)
+- **D-pad**: stock cursor, or walking if "D-pad walking" is on (Controls menu)
+- **Inventory and chests**: tap to move items (tap a stack, then tap a slot to place, swap
+  or merge; works across the chest / inventory tabs)
 - **L + R**: 2x zoom; **SELECT**: mod menu; **L + R + Y**: cheat console
 
 ## Requirements

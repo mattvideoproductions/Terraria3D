@@ -19,6 +19,12 @@ namespace t3d::features
 
     bool    Zoom2x();
 
+    // Plugin menu open / close (plugin thread). Closing the menu makes the
+    // game open its pause page; when the menu was opened from play, the next
+    // game tick presses "Return to Game" (A) once.
+    void    OnMenuOpening();
+    void    OnMenuClosing();
+
     // C-stick diagnostics: raw values from the game and the ir:rst fallback.
     std::string CstickStatus();
     bool    ShowCstickDebug();

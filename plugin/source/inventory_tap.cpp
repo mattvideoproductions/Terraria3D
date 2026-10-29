@@ -1,5 +1,7 @@
 #include "inventory_tap.hpp"
 
+#include <CTRPluginFramework.hpp>
+
 #include <cstdarg>
 #include <cstdio>
 #include <string>
@@ -28,6 +30,15 @@
 // The hooks only record; the action runs in the grid's own Update (0x254180),
 // after the touch pass, the drag helper's cleanup and any signal emission
 // have finished, with the slot checked against the grid's slot list first.
+//
+// v0.5.4 (why v0.5.3 picked but never placed on hardware): the game's carry
+// (0x252A90, mode 1) disables touch on the whole slot list (ListView vt+0x14
+// -> every widget +0x88 = 0), so the second tap never reached any hook. After
+// a tap pick-up the list's touch is enabled again (vt+0x10, what the game's
+// own return to normal does). Chest <-> inventory: the tabs are separate
+// grids, so the carry's grid is hidden and its state reset; the picked Item*
+// is kept as a "pending" carry and the next slot tap in the new tab places
+// it with the game's own rules (0x1866FC, 0x3C76F4 merge/move, 0x3C766C swap).
 //
 // DSInventoryItemGrid (ctor 0x254748, vtable 0x5D7E9C, 0x50 bytes):
 //   +0x28 ItemWidgetDragDropHelper*   (+0x38 u8 enabled, +0x3C source, +0x40 target)
@@ -84,6 +95,16 @@ namespace t3d::inventory_tap
         constexpr u32 kWidgetVtRect    = 0x58;       // Widget vtable: GetRect(Rect *out, Widget *)
         constexpr u32 kWidgetPressedHere = 0x8B;     // u8: the current touch began on this widget
         constexpr u32 kSlotItem        = 0x160;
+        constexpr u32 kSlotType        = 0x18C;      // u8 slot kind for 0x1866FC (0 = any item)
+        constexpr u32 kGridSource      = 0x2C;       // data source (chest / inventory tab swaps it, 0x2527DC)
+        constexpr u32 kWidgetVtEnable  = 0x10;       // Widget vtable: enable touch, recursive (+0x88 = 1; 0x1E18C8 for ListView)
+        constexpr u32 kFnSlotAccepts   = 0x001866FC; // (Item*, slot kind) -> can that slot hold the item
+        constexpr u32 kFnItemMerge     = 0x003C76F4; // (src, dst): merge / move into empty -> 0/1, different -> 2
+        constexpr u32 kFnItemSwap      = 0x003C766C; // (a, b): swap 0x84 bytes
+        constexpr u64 kTicksPerSec     = 268111856ull;        // SYSCLOCK_ARM11
+        constexpr u64 kHiddenTicks     = kTicksPerSec / 10;   // carry grid silent this long (another grid updating) = tab switched away
+        constexpr u64 kPendingTicks    = kTicksPerSec / 2;    // no grid updating this long = inventory closed: drop any carry state
+        constexpr u32 kHiddenUpdates   = 4;                    // ... and at least this many updates of another grid
         constexpr u32 kItemStack       = 0x28;
         constexpr u32 kItemType        = 0x52;
         constexpr int kMaxSlots        = 256;
@@ -96,7 +117,36 @@ namespace t3d::inventory_tap
         using FnTouchPos   = void (*)(float *out, void *touch);
         using FnRect       = void (*)(float *out, void *widget);
 
-        hook::FunctionHook s_tapHook, s_releaseHook, s_droppedHook, s_updateHook;
+        hook::FunctionHook s_tapHook, s_releaseHook, s_droppedHook, s_updateHook, s_touchReadHook;
+
+        // ---- emulator test input (inert on hardware) ----
+        // Azahar's window can't take synthetic mouse input while the harness
+        // stays focus-free, and its RPC can't write plugin memory, so the
+        // harness (tools/azahar_touch.py) writes a touch into the zero padding
+        // after the game's .text (0x5C0BBC..0x5C0FFF, same mapped page, never
+        // written by the game). On a console nothing writes there, so the
+        // magic never appears and the hook only calls the game.
+        constexpr u32 kFnTouchRead     = 0x002B4A78; // (TouchReader*, u8 status[5]): x u16, y u16, touched u8; sole caller 0x3FA7E0
+        constexpr u32 kTouchReadInsn   = 0xE92D4010; //   push {r4, lr}
+        constexpr u32 kTestTouchMagic  = 0x54335454; // "TT3T"
+        constexpr u32 kTestTouchBox    = 0x005C0F00; // [0] magic = touching, [1] x | y << 16 (bottom screen px)
+
+        void Note(const char *fmt, ...);
+
+        bool Hooked_TouchRead(void *reader, u8 *status)
+        {
+            bool ok = hook::FunctionHook::CallOriginal<bool>(reader, status);
+            const volatile u32 *box = reinterpret_cast<const volatile u32 *>(kTestTouchBox);
+            if (box[0] == kTestTouchMagic && status)
+            {
+                const u32 xy = box[1];
+                *reinterpret_cast<u16 *>(status + 0) = static_cast<u16>(xy & 0xFFFF);
+                *reinterpret_cast<u16 *>(status + 2) = static_cast<u16>(xy >> 16);
+                status[4] = 1;
+                ok = true;
+            }
+            return ok;
+        }
         volatile bool      s_enabled = true;
         bool               s_installed = false;
 
@@ -135,6 +185,24 @@ namespace t3d::inventory_tap
         // switch, page change). Pointers are only compared.
         void *s_carryGrid = nullptr;
         void *s_carrySrc  = nullptr;
+        // What that carry holds, captured at pick-up. Switching the bottom
+        // screen tab (chest <-> inventory) hides the carry's grid (0x252B1C
+        // exits the move state) and shows another grid, or swaps a grid's data
+        // source (0x2527DC, resets the state): either way the game's carry is
+        // gone. The Item itself lives in the chest / player arrays and stays
+        // put, so a tap on a slot of the new tab still places it ("pending"
+        // carry, plugin side; Azahar 2026-10-29: the chest page's tabs are
+        // separate grids).
+        void *s_carryItem = nullptr;     // Item* in the source container
+        void *s_carryDs   = nullptr;     // data source at pick-up
+        u8    s_carryKind = 0;           // source slot kind (+0x18C)
+        s16   s_carryType = 0, s_carryStack = 0;
+        u64   s_carrySeen = 0;           // system tick of the carry grid's last update
+        u32   s_otherUpdates = 0;        // updates of other grids since the carry grid's last one
+        u64   s_anyGridSeen = 0;         // system tick of the last update of any grid
+        bool  s_pending   = false;       // the carry outlived its grid state: any grid's next slot tap places it
+        u64   s_pendSeen  = 0;           // system tick of the last grid update while pending
+        volatile bool s_pendNotify = false;
 
         template <typename T>
         inline T Field(void *obj, u32 off) { return *reinterpret_cast<T *>(static_cast<u8 *>(obj) + off); }
@@ -200,6 +268,66 @@ namespace t3d::inventory_tap
                    rect[1] <= pos[1] && pos[1] <= rect[1] + rect[3];
         }
 
+        using FnAccepts = bool (*)(void *item, u32 kind);
+        using FnItems   = u32 (*)(void *a, void *b);
+
+        void ClearCarry()
+        {
+            s_carryGrid = s_carrySrc = s_carryItem = s_carryDs = nullptr;
+            s_pending = false;
+        }
+
+        // The game's carry disables touch on the whole slot list (0x252A90 ->
+        // ListView vt+0x14, every widget's +0x88 = 0): A-carry is meant for the
+        // D-pad. That is why v0.5.3 never saw the second tap on hardware. Turn
+        // touch back on for a carry we started; the normal-state switch
+        // (0x253208) enables it again anyway.
+        void EnableListTouch(void *grid)
+        {
+            void *lv = Field<void *>(grid, kGridLv);
+            if (!lv)
+                return;
+            void **vt = Field<void **>(lv, 0);
+            reinterpret_cast<void (*)(void *)>(vt[kWidgetVtEnable / 4])(lv);
+        }
+
+        // Pending carry (after a tab switch): the game's own place rules
+        // (0x2522AC / 0x252214), with the source slot kind recorded at pick-up.
+        void PlacePending(void *grid, void *w, int idx, const char *why)
+        {
+            void *srcItem = s_carryItem;
+            void *dstItem = Field<void *>(w, kSlotItem);
+            if (!srcItem || !dstItem || srcItem == dstItem)
+            {
+                Note("cancelled (%s): pending carry, slot %d is the source", why, idx);
+                ClearCarry();
+                return;
+            }
+            const s16 sType = Field<s16>(srcItem, kItemType), sStack = Field<s16>(srcItem, kItemStack);
+            if (sType != s_carryType || sStack != s_carryStack || sType <= 0)
+            {
+                Note("cancelled (%s): pending item changed (%d x%d, was %d x%d)", why, sType, sStack,
+                     s_carryType, s_carryStack);
+                ClearCarry();
+                return;
+            }
+            const s16 dType = Field<s16>(dstItem, kItemType), dStack = Field<s16>(dstItem, kItemStack);
+            const bool ok = reinterpret_cast<FnAccepts>(kFnSlotAccepts)(srcItem, Field<u8>(w, kSlotType))
+                         && reinterpret_cast<FnAccepts>(kFnSlotAccepts)(dstItem, s_carryKind);
+            if (ok)
+            {
+                const u32 r = reinterpret_cast<FnItems>(kFnItemMerge)(srcItem, dstItem);
+                if (r == 2)
+                    reinterpret_cast<FnItems>(kFnItemSwap)(srcItem, dstItem);
+            }
+            reinterpret_cast<FnGridWidget>(kFnGridToNormal)(grid, w);    // select the target (state is normal)
+            Note("%s (%s): pending -> slot %d | before src %d x%d dst %d x%d | after src %d x%d dst %d x%d",
+                 ok ? "placed" : "ignored (slot rules refused)", why, idx, sType, sStack, dType, dStack,
+                 Field<s16>(srcItem, kItemType), Field<s16>(srcItem, kItemStack),
+                 Field<s16>(dstItem, kItemType), Field<s16>(dstItem, kItemStack));
+            ClearCarry();
+        }
+
         void Act(void *grid, void *w, const char *why)
         {
             const int idx = SlotIndex(grid, w);
@@ -215,6 +343,11 @@ namespace t3d::inventory_tap
 
             if (state && state == normal)
             {
+                if (s_pending)
+                {
+                    PlacePending(grid, w, idx, why);
+                    return;
+                }
                 void *helper = Field<void *>(grid, kGridHelper);
                 if (type <= 0)
                 {
@@ -229,8 +362,17 @@ namespace t3d::inventory_tap
                 reinterpret_cast<FnGridWidget>(kFnGridActivate)(grid, w);
                 if (CarrySource(grid) == w)
                 {
-                    s_carryGrid = grid;
-                    s_carrySrc  = w;
+                    EnableListTouch(grid);
+                    s_carryGrid  = grid;
+                    s_carrySrc   = w;
+                    s_carryItem  = Field<void *>(w, kSlotItem);
+                    s_carryDs    = Field<void *>(grid, kGridSource);
+                    s_carryKind  = Field<u8>(w, kSlotType);
+                    s_carryType  = static_cast<s16>(type);
+                    s_carryStack = static_cast<s16>(stack);
+                    s_carrySeen  = svcGetSystemTick();
+                    s_otherUpdates = 0;
+                    s_pending    = false;
                     Note("picked (%s): slot %d, item %d x%d", why, idx, type, stack);
                 }
                 else
@@ -263,7 +405,7 @@ namespace t3d::inventory_tap
                     if (CarrySource(grid))
                         Note("note: still carrying after place on slot %d", idx);
                 }
-                s_carryGrid = s_carrySrc = nullptr;
+                ClearCarry();
                 return;
             }
 
@@ -331,6 +473,63 @@ namespace t3d::inventory_tap
                 return;
             }
 
+            // Carry bookkeeping before any action (see s_carryItem).
+            const u64 now = svcGetSystemTick();
+            // No grid updated for a while: the inventory / chest was closed.
+            // Whatever we were carrying stays where it is; forget it, so a
+            // later page never picks up a stale carry (audit, v0.5.4).
+            if ((s_carryGrid || s_pending) && now - s_anyGridSeen > kPendingTicks)
+            {
+                Note("carry dropped: inventory closed");
+                ClearCarry();
+            }
+            s_anyGridSeen = now;
+            void *src = CarrySource(grid);
+            void *input = reinterpret_cast<FnInput>(kFnInput)();
+            const bool pressedB = input && reinterpret_cast<FnPressed>(kFnPressed)(input, kButtonB);
+            if (s_carryGrid && !s_pending)
+            {
+                if (grid == s_carryGrid)
+                {
+                    s_carrySeen = now;
+                    s_otherUpdates = 0;
+                    if (src != s_carrySrc)
+                    {
+                        // Same grid, data source swapped: keep it. Anything
+                        // else (A placed it, B, a new carry) ends it.
+                        if (!src && Field<void *>(grid, kGridSource) != s_carryDs && s_carryItem)
+                            s_pending = true;
+                        else
+                        {
+                            Note("carry ended by the game (A button or page change)");
+                            ClearCarry();
+                        }
+                    }
+                }
+                else if (++s_otherUpdates >= kHiddenUpdates && now - s_carrySeen > kHiddenTicks)
+                    s_pending = true;           // another grid runs and ours stopped: tab switched
+                if (s_pending)
+                {
+                    s_pendSeen = now;
+                    s_pendNotify = true;
+                    Note("carry kept across a tab switch: item %d x%d, tap a slot to place it",
+                         s_carryType, s_carryStack);
+                }
+            }
+            else if (s_pending)
+            {
+                // Dropped when the inventory was closed (no grid updated for a
+                // while), on B, or when the game starts its own carry.
+                const bool expired = now - s_pendSeen > kPendingTicks;
+                if (expired || pressedB || src)
+                {
+                    Note("pending carry dropped (%s)", expired ? "inventory closed" : pressedB ? "B" : "game carry");
+                    ClearCarry();
+                }
+                else
+                    s_pendSeen = now;
+            }
+
             // One action per touch: a quick tap records both "tap" and
             // "release" for the same slot.
             void *lv = Field<void *>(grid, kGridLv);
@@ -349,20 +548,11 @@ namespace t3d::inventory_tap
                 return;
             }
 
-            void *src = CarrySource(grid);
-            if (s_carryGrid == grid && src != s_carrySrc)
-            {
-                Note("carry ended by the game (page/tab change or A button)");
-                s_carryGrid = s_carrySrc = nullptr;
-            }
-            if (!src)
-                return;
-            void *input = reinterpret_cast<FnInput>(kFnInput)();
-            if (input && reinterpret_cast<FnPressed>(kFnPressed)(input, kButtonB))
+            if (src && src == s_carrySrc && grid == s_carryGrid && pressedB)
             {
                 reinterpret_cast<FnGridWidget>(kFnGridToNormal)(grid, src);   // item never left its slot
                 Note("cancelled (B): carried slot %d", SlotIndex(grid, src));
-                s_carryGrid = s_carrySrc = nullptr;
+                ClearCarry();
             }
         }
     }
@@ -377,16 +567,23 @@ namespace t3d::inventory_tap
                                                      kGridDroppedInsn);
         const hook::Result d = s_updateHook.Install(kFnGridUpdate, reinterpret_cast<void *>(Hooked_GridUpdate),
                                                     kGridUpdateInsn);
+        const hook::Result t = s_touchReadHook.Install(kFnTouchRead, reinterpret_cast<void *>(Hooked_TouchRead),
+                                                       kTouchReadInsn);
         s_installed = a == hook::Result::Ok && b == hook::Result::Ok && c == hook::Result::Ok &&
                       d == hook::Result::Ok;
         // Partial installs are harmless (each hook calls the game first and
         // only records; actions need the Update hook), but report it.
-        Note("hooks: tap %s, release %s, dropped %s, update %s", hook::ResultString(a), hook::ResultString(b),
-             hook::ResultString(c), hook::ResultString(d));
+        Note("hooks: tap %s, release %s, dropped %s, update %s, test touch %s", hook::ResultString(a),
+             hook::ResultString(b), hook::ResultString(c), hook::ResultString(d), hook::ResultString(t));
     }
 
     void FlushLog()
     {
+        if (s_pendNotify)
+        {
+            s_pendNotify = false;
+            CTRPluginFramework::OSD::Notify("Item still in hand: tap a slot to put it there (B cancels)");
+        }
         while (s_logTail != s_logHead)
         {
             __sync_synchronize();

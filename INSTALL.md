@@ -1,4 +1,4 @@
-# Terraria 3D mod v0.5.3: install guide
+# Terraria 3D mod v0.5.4: install guide
 
 Terraria 3D is a Luma3DS plugin (a `.3gx` file) that adds real stereoscopic 3D to
 Terraria on the Nintendo 3DS. This guide takes about five minutes.
@@ -45,11 +45,15 @@ notice and applies no patches, so nothing is broken, but nothing works either.
 ## Controls
 
 - **ZR**: use / mine / place at the C-stick aim point
-- **ZL**: grappling hook
+- **ZL**: switch the C-stick style (Spring / Cursor); a short notice names the style
+- **A**: interact and grappling hook (stock). "ZL = grapple" is still in the menu
+  (ZL button, or the "New 3DS, ZL grapple" preset)
 - **Y**: stock behaviour (smart-cursor stock/break when the C-stick is centred)
-- **C-stick**: aim; with a pickaxe, axe or hammer, pushing it auto-tunnels in that direction
-- **Y + ZR**: toggle the C-stick style (Spring / Cursor)
-- **Inventory**: tap to move items (tap a stack to pick it up, tap a slot to place, swap or merge)
+- **C-stick**: aim; with a pickaxe, axe or hammer, a half push auto-tunnels in that
+  direction ("C-stick tool mode": Auto-tunnel or Precise)
+- **D-pad**: stock cursor, or walking if "D-pad walking" is on (Controls menu)
+- **Inventory and chests**: tap to move items (tap a stack, then tap a slot to place, swap
+  or merge; works across the chest / inventory tabs)
 - **L + R**: 2x zoom; **SELECT**: mod menu; **L + R + Y**: cheat console
 
 ## Using the menu
@@ -57,7 +61,9 @@ notice and applies no patches, so nothing is broken, but nothing works either.
 - **Stereo 3D**: enable/disable, per-layer depth, Depth preset, Depth strength,
   Pop-out effects, Invert depth, Diagnostics.
 - **2x zoom hotkey**: L + R by default.
-- **Controls**: C-stick mode, C-stick style (Spring or Cursor; in play, hold Y and press ZR to switch), Cursor speed, Circle pad: interact only, C-stick debug.
+- **Controls**: Control preset, ZL / ZR buttons, C-stick aiming, C-stick style (Spring or
+  Cursor; ZL switches it in play), C-stick tool mode (Auto-tunnel or Precise), Y button,
+  Cursor speed, Cursor auto-hide, D-pad walking, Circle pad: interact only, C-stick debug.
 - **Colour booster (fake OLED)**: Normal / OLED / OLED vivid. It uses the display
   hardware, so it costs no FPS.
 - **Cheats**: cheat console hotkey (L + R + Y) or open it from the menu.

@@ -2,8 +2,8 @@ Author: Terraria 3D mod team
 
 Version:
     Major: 0
-    Minor: 0
-    Revision: 1
+    Minor: 5
+    Revision: 4
 
 Targets: # Low title IDs this plugin is compatible with
     - 0x0016A900   # Terraria (USA)
@@ -13,7 +13,7 @@ Title: Terraria 3D mod
 Summary: Stereoscopic 3D, zoom and UI fixes for Terraria 3DS (v5.6.0)
 
 Description: |
-  Terraria 3D mod v0.0.1 (skeleton)
+  Terraria 3D mod v0.5.4
   Requires Terraria USA (000400000016A900) with update v5.6.0.
   The plugin verifies the game code before patching and
   refuses to patch any other version.
