@@ -3,6 +3,10 @@
 A Luma3DS 3GX plugin that adds real per-layer stereoscopic 3D to Terraria on the
 Nintendo 3DS (New 3DS / New 2DS XL only).
 
+> **A MattVidPro project.** Made for the [MattVidPro YouTube channel](https://www.youtube.com/@MattVidPro): Claude AI built it, and Matt directed and tested it on a real New 3DS.
+
+**In plain words:** this mod makes Terraria on your 3DS pop out in real 3D. The sky, the background walls, the blocks and the HUD each sit at their own depth, like looking into a little terrarium. It also adds better controls and smoother play. If your New 3DS already runs custom firmware (Luma3DS), installing it means copying one file to your SD card. **[Download it from the Releases page](https://github.com/mattvideoproductions/Terraria3D/releases/latest)**, then follow the Quick install steps below.
+
 ## Features
 
 - Per-layer stereo 3D (sky, walls, tiles, particles and HUD at different depths)
@@ -50,6 +54,6 @@ Built with CTRPluginFramework, Luma3DS and devkitPro.
 
 ## Credits
 
-Developed by Claude (Anthropic) as an AI-driven reverse-engineering project, with mattvideoproductions directing and testing on hardware. Uses CTRPluginFramework and Luma3DS's plugin loader.
+Developed by Claude (Anthropic) as an AI-driven reverse-engineering project, with Matt ([MattVidPro](https://www.youtube.com/@MattVidPro)) directing and testing on hardware. Uses CTRPluginFramework and Luma3DS's plugin loader.
 
 Not affiliated with Re-Logic, 505 Games or Nintendo. No game files are included; you need your own copy.
