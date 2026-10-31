@@ -66,7 +66,7 @@ all: release
 release: | build/release
 	@$(MAKE) BUILD=release OUTPUT=$(CURDIR)/$(TARGET).3gx \
 		BUILD_LIBS="-lctrpf -lctru" WL=--strip-discarded,--strip-debug, \
-		BUILD_CFLAGS="-DNDEBUG=1 -O2 -fomit-frame-pointer" \
+		BUILD_CFLAGS="-DNDEBUG=1 -O2 -fomit-frame-pointer $(T3D_EXTRA)" \
 		DEPSDIR=$(CURDIR)/build/release --no-print-directory \
 		-C build/release -f $(CURDIR)/Makefile
 

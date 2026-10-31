@@ -70,6 +70,10 @@ namespace t3d::perf
     void    Log(const std::string &line);    // event line (timestamped)
     void    LogWindowIfNew(const std::string &context); // one line per window
     const char *LogPath();
+#ifndef T3D_O3DS
+    // Any thread, panic paths only: this line, written now.
+    void    PanicWrite(const char *line);
+#endif
 #ifdef T3D_O3DS
     // Old 3DS build: the log is batched (one SD write per ~5 s); LogNow
     // writes at once (events, settings, failures). Plugin thread only.

@@ -109,8 +109,29 @@ namespace t3d::perf
                 FlushBuffer();
         }
 #else
+        // New 3DS (v0.5.6): rotate once at boot when the log is over 2 MiB
+        // (it grew to 3.6 MiB across sessions on Matt's card).
+        constexpr const char *kLogOldPath = "/luma/plugins/000400000016A900/t3d_log_old.txt";
+        constexpr u64 kRotateBytes = 2u * 1024u * 1024u;
+        bool s_rotated = false;
+
         void Append(const std::string &line)
         {
+            if (!s_rotated)
+            {
+                s_rotated = true;
+                File r;
+                if (File::Open(r, kLogPath, File::READ) == File::SUCCESS)
+                {
+                    const u64 size = r.GetSize();
+                    r.Close();
+                    if (size > kRotateBytes)
+                    {
+                        File::Remove(kLogOldPath);
+                        File::Rename(kLogPath, kLogOldPath);
+                    }
+                }
+            }
             File f;
             if (File::Open(f, kLogPath, File::WRITE | File::CREATE | File::APPEND) != File::SUCCESS)
                 return;
@@ -265,6 +286,21 @@ namespace t3d::perf
     }
 
     const char *LogPath() { return kLogPath; }
+#ifndef T3D_O3DS
+    void PanicWrite(const char *line)
+    {
+        // Any thread, from a panic path: one direct append, no std::string.
+        static char ts[24];
+        snprintf(ts, sizeof(ts), "[%8.2f] ", Seconds());
+        File f;
+        if (File::Open(f, kLogPath, File::WRITE | File::CREATE | File::APPEND) != File::SUCCESS)
+            return;
+        f.Write(ts, strlen(ts));
+        f.Write(line, strlen(line));
+        f.Write("\n", 1);
+        f.Close();
+    }
+#endif
 #ifdef T3D_O3DS
     void  FlushLog()    { FlushBuffer(); }
     void  LogNow(const std::string &line) { Log(line); FlushBuffer(); }

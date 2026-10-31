@@ -1,4 +1,4 @@
-# Terraria 3D (v0.5.5 New 3DS, v0.7.0 Old 3DS)
+# Terraria 3D (v0.5.6 New 3DS, v0.7.0 Old 3DS)
 
 A Luma3DS 3GX plugin that adds real per-layer stereoscopic 3D to Terraria on the
 Nintendo 3DS. There are two builds: one for the New 3DS and one for the Old 3DS.
@@ -11,7 +11,7 @@ Nintendo 3DS. There are two builds: one for the New 3DS and one for the Old 3DS.
 
 | Your console | Download | Install guide |
 |---|---|---|
-| **New 3DS**, New 3DS XL, New 2DS XL | **[Terraria 3D v0.5.5](https://github.com/mattvideoproductions/Terraria3D/releases/latest)** (`Terraria3D.3gx`) | [INSTALL.md](INSTALL.md) |
+| **New 3DS**, New 3DS XL, New 2DS XL | **[Terraria 3D v0.5.6](https://github.com/mattvideoproductions/Terraria3D/releases/latest)** (`Terraria3D.3gx`) | [INSTALL.md](INSTALL.md) |
 | **Old 3DS**, 3DS XL, 2DS (the originals) | **[Terraria 3D v0.7.0 for Old 3DS](https://github.com/mattvideoproductions/Terraria3D/releases/tag/o3ds-v0.7.0)** (`Terraria3D-Old3DS-v0.7.0.zip`) | [INSTALL_OLD_3DS.md](INSTALL_OLD_3DS.md) |
 
 Not sure which you have? A New 3DS has a small C-stick nub above the ABXY buttons and ZL / ZR buttons on the back. If yours doesn't, it's an Old 3DS. Use only one of the two files: both go in the same folder with the same name.

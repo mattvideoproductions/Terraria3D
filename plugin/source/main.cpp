@@ -17,6 +17,9 @@
 #include "stereo_present.hpp"
 #include "ui_theme.hpp"
 #include "version_check.hpp"
+#ifndef T3D_O3DS
+#include "n3ds_memory.hpp"
+#endif
 
 #ifdef T3D_O3DS
 #ifdef T3D_TEST_SIM_LUMA_CHARGE
@@ -26,7 +29,11 @@
 #endif
 #define T3D_NAME        "Terraria 3D mod v" T3D_VERSION_STR " (Old 3DS)"
 #else
-#define T3D_VERSION_STR "0.5.5"
+#ifdef T3D_TEST_SIM_N3DS_CHARGE
+#define T3D_VERSION_STR "0.5.6-TEST-EMULATOR-ONLY"   // never put this build on a console
+#else
+#define T3D_VERSION_STR "0.5.6"
+#endif
 #define T3D_NAME        "Terraria 3D mod v" T3D_VERSION_STR
 #endif
 
@@ -51,6 +58,9 @@ namespace CTRPluginFramework
 #ifdef T3D_O3DS
             // Before the game runs nninitStartUp (heap sizes).
             t3d::o3ds::PatchGameMemory();
+#else
+            // v0.5.6: device heap +4 MiB for the world map (crash fix).
+            t3d::n3ds::PatchGameMemory();
 #endif
             t3d::stereo::present::Install();
             t3d::features::Install();
@@ -62,6 +72,8 @@ namespace CTRPluginFramework
             t3d::o3ds::InstallPanicHooks();
             // Before the game allocates anything: what Luma left us.
             t3d::perf::LogNow("boot " + t3d::o3ds::MemLine());
+#else
+            t3d::n3ds::InstallPanicHooks();
 #endif
         }
     }
@@ -100,6 +112,9 @@ namespace CTRPluginFramework
                                : sl::RightTargetFailed() ? "Per-layer depth (unavailable: no memory)"
                                : "Per-layer depth (costs fps on Old 3DS)";
     }
+#else
+    static u32  s_n3dsMemSeq = 0;
+    static std::string s_n3dsMemLine = "mem -";
 #endif
     static u32 s_statsSeq = 0;
     static std::string s_bgStats = "bg -";
@@ -205,7 +220,14 @@ namespace CTRPluginFramework
                    Utils::Format(" | sdflush %.0fms | ", t3d::perf::LastFlushMs()) + s_memLine;
             t3d::perf::LogWindowIfNew(ctx);
 #else
-            t3d::perf::LogWindowIfNew(ctx + " | " + t3d::features::CstickStatus());
+            // Game heaps every 10 s (v0.5.6: the world map's textures live
+            // in the device heap; a recurrence should show it running low).
+            if (seq != s_n3dsMemSeq && seq % 10 == 1)
+            {
+                s_n3dsMemSeq = seq;
+                s_n3dsMemLine = t3d::n3ds::MemLine();
+            }
+            t3d::perf::LogWindowIfNew(ctx + " | " + t3d::features::CstickStatus() + " | " + s_n3dsMemLine);
 #endif
         }
     }
