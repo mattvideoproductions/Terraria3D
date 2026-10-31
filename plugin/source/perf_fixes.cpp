@@ -490,4 +490,8 @@ namespace t3d::perf_fixes
     }
 
     bool NoCatchUp() { return s_noCatchUp; }
+#ifdef T3D_O3DS
+    u32  DrawMain()  { return s_main; }
+    void ClearDrawMain() { s_main = 0; }
+#endif
 }

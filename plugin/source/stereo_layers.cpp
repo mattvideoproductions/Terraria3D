@@ -4,6 +4,9 @@
 #include "hooks.hpp"
 #include "memory.hpp"
 #include "perf.hpp"
+#ifdef T3D_O3DS
+#include "o3ds.hpp"
+#endif
 
 extern "C" {
 #include <3ds/svc.h>
@@ -169,6 +172,16 @@ namespace
         { "Combat (enemies forward)", 0.00f, -0.40f, -0.20f, {
             1.00f, 0.90f, 0.85f, 0.78f, 0.70f, 0.62f, 0.50f, 0.32f, 0.32f, 0.32f, 0.26f, 0.24f, 0.18f, 0.18f,
             0.00f, 0.00f, 0.00f, -0.12f, -0.35f, -0.14f, -0.08f, 0.05f, -0.45f, -0.55f, 0.00f, 0.00f, -0.65f, -0.20f, 0.00f } },
+#ifdef T3D_O3DS
+        // Old 3DS default (v0.6.0): Terrarium Window's look in four planes.
+        // Fewer distinct depths = fewer depth splits of texture runs in the
+        // right-eye replay (fewer draw calls and projection uploads); the
+        // whole play plane (tiles, NPCs, effects, items) shares one depth, so
+        // the world segment replays in long runs.
+        { "Lite (4 planes, Old 3DS)", 0.00f, 0.05f, 0.00f, {
+            0.80f, 0.80f, 0.80f, 0.80f, 0.80f, 0.80f, 0.50f, 0.32f, 0.32f, 0.32f, 0.32f, 0.32f, 0.32f, 0.32f,
+            0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f } },
+#endif
     };
     constexpr int kPresetCount = sizeof(kPresets) / sizeof(kPresets[0]);
     constexpr int kDioramaPreset = 1;
@@ -176,7 +189,11 @@ namespace
 
     float s_depth[kSiteCount];
     float s_sky = 0.00f, s_overlay = 0.05f, s_hud = 0.0f;
+#ifdef T3D_O3DS
+    int   s_preset = kPresetCount - 1;    // Lite
+#else
     int   s_preset = 0;
+#endif
 
     // Title / menu background (MenuBackground::Draw 0x21B770, vtable 0x5D7168,
     // top screen only). It runs the same sky/background pass 0x17F418, so
@@ -285,15 +302,65 @@ namespace
     u32     s_rightRT = 0;
     bool    s_rtFailed = false;
     bool    s_rtInFcram = false;
+#ifdef T3D_O3DS
+    bool    s_o3dsReserving = false;    // inside ReserveRightTarget (title, first frame)
+    u32     s_o3dsRtAddr = 0;           // where the right target's colour buffer landed
+#endif
 
     bool CreateRightTarget()
     {
         // Same descriptor as the game's top colour buffer (0x5C2C14):
         // 256x512, 1 level, RGBA8, 8-byte align, location (1 FCRAM, 2 VRAM-A, 4 VRAM-B)
+#ifdef T3D_O3DS
+        // Old 3DS (v0.7.0): a cropped 240x400 RGBA8 target (375 KiB) instead
+        // of the game's 256x512 (512 KiB). Stock VRAM is full once the title
+        // has loaded; the flat right-eye buffers (607.5 KiB, reserved just
+        // before this) already push one 1 MiB atlas page into the device
+        // heap, which the +1 MiB device-heap patch pays for. 607.5 + 375 =
+        // 982.5 KiB still fits in that one displaced page, so this target
+        // costs the game no further memory (a 512 KiB one would have pushed
+        // out a second page: the v0.6.1 refusal). CreateTexture2DResource
+        // skips the power-of-two check for 1 mip level (0x113574) and the
+        // B2L copy reads rows [resH-400, resH) (0x112FEC), so 240x400 works
+        // like the game's own 240x320 bottom target. Only at the title
+        // reservation, only in VRAM-B, never in FCRAM, never lazily.
+        if (!s_o3dsReserving)
+            return false;
+        u32 desc[6] = { 240, 400, 1, 0, 8, 4 };
+        u32 reso = 0;
+        t3d::o3ds::BeginRightTargetAlloc();
+        const u32 rc = gdCreateTexResource(desc, 0, 0, &reso, 1);
+        t3d::o3ds::EndRightTargetAlloc();
+        if (rc & 0x80000000)
+            return false;
+        // The colour buffer's address (res+0x1C, read by the B2L copy
+        // 0x112FEC) must be in VRAM-B. Anywhere else would displace a page
+        // the game has no memory for (audit): never use it.
+        const u32 addr = R32(reso + 0x1C);
+        s_o3dsRtAddr = addr;
+        if (addr < 0x1F300000 || addr + 240u * 400u * 4u > 0x1F600000)
+            return false;
+        const u32 mip0o = 0;
+        u32 rto = 0;
+        if (gdCreateRenderTarget(reso, &mip0o, &rto) & 0x80000000)
+            return false;
+        s_rightRes = reso;
+        s_rightRT = rto;
+        return true;
+#else
         u32 desc[6] = { 0x100, 0x200, 1, 0, 8, 4 };
+#endif
         u32 res = 0;
         if (gdCreateTexResource(desc, 0, 0, &res, 1) & 0x80000000)
         {
+#ifdef T3D_O3DS
+            // Old 3DS: no FCRAM fallback. 512 KiB out of the game's own
+            // device heap (64 MiB console) is the world-map crash risk of
+            // LESSONS #4 again, and FCRAM targets showed black (#3). Without
+            // the target, per-layer depth is off and flat 3D still works.
+            // (Reported by the plugin thread: RightTargetFailed().)
+            return false;
+#endif
             desc[5] = 1;
             s_rtInFcram = true;
             res = 0;
@@ -718,9 +785,21 @@ namespace t3d::stereo::layers
     {
         // Called on the first displayed frame (title screen), while VRAM-B is
         // still free; see stereo_present.cpp OnPreTop.
+#ifdef T3D_O3DS
+        s_o3dsReserving = true;
+#endif
         if (s_installed && !s_rightRT && !s_rtFailed && !CreateRightTarget())
             s_rtFailed = true;
+#ifdef T3D_O3DS
+        s_o3dsReserving = false;
+#endif
     }
+
+#ifdef T3D_O3DS
+    void RefuseRightTarget()        { if (!s_rightRT) s_rtFailed = true; }
+    u32  RightTargetBytes()         { return s_rightRT ? 240u * 400u * 4u : 0u; }
+    u32  RightTargetAddr()          { return s_o3dsRtAddr; }
+#endif
 
     void BeginFrame(bool on, float sepPx)
     {

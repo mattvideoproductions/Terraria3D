@@ -70,4 +70,18 @@ namespace t3d::perf
     void    Log(const std::string &line);    // event line (timestamped)
     void    LogWindowIfNew(const std::string &context); // one line per window
     const char *LogPath();
+#ifdef T3D_O3DS
+    // Old 3DS build: the log is batched (one SD write per ~5 s); LogNow
+    // writes at once (events, settings, failures). Plugin thread only.
+    void    LogNow(const std::string &line);
+    void    FlushLog();
+    // Any thread, panic paths only: pending batch + this line, written now.
+    void    PanicWrite(const char *line);
+    // Game thread: the pacing wait ran between the top copy and the GPU
+    // wait; move the "bottom screen" start past it.
+    void    ShiftTopDoneTick(u64 ticks);
+    float   LastFlushMs();
+    // "frame 33.4ms avg 41.0 max" (last window)
+    std::string FrameLine();
+#endif
 }

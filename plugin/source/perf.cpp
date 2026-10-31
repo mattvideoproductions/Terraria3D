@@ -42,6 +42,73 @@ namespace t3d::perf
 
         u64 s_bootTick = 0;
 
+#ifdef T3D_O3DS
+        // Old 3DS: one SD write every ~5 s instead of every second (the
+        // file open/append/close costs more on the slower CPU), and the log
+        // rotates at boot (LESSONS: caps must rotate, not stop).
+        constexpr const char *kLogOldPath = "/luma/plugins/000400000016A900/t3d_log_old.txt";
+        constexpr u32 kRotateBytes = 2u * 1024u * 1024u;
+        std::string s_buf;
+        bool  s_rotated = false;
+        u64   s_fileBytes = 0;          // size of t3d_log.txt as far as we know
+        u64   s_lastFlush = 0;
+        float s_flushMs = 0.0f;
+
+        void Rotate()
+        {
+            s_rotated = true;
+            File f;
+            if (File::Open(f, kLogPath, File::READ) != File::SUCCESS)
+                return;
+            const u64 size = f.GetSize();
+            f.Close();
+            s_fileBytes = size;
+            if (size < kRotateBytes)
+                return;
+            File::Remove(kLogOldPath);
+            File::Rename(kLogPath, kLogOldPath);
+            s_fileBytes = 0;
+        }
+
+        void FlushBuffer()
+        {
+            if (s_buf.empty())
+                return;
+            const u64 t0 = svcGetSystemTick();
+            File f;
+            if (File::Open(f, kLogPath, File::WRITE | File::CREATE | File::APPEND) == File::SUCCESS)
+            {
+                f.Write(s_buf.data(), s_buf.size());
+                f.Close();
+            }
+            s_fileBytes += s_buf.size();
+            s_buf.clear();
+            s_lastFlush = svcGetSystemTick();
+            if (s_fileBytes >= kRotateBytes)
+            {
+                // Over the cap mid-session: rotate now (never just stop).
+                File::Remove(kLogOldPath);
+                File::Rename(kLogPath, kLogOldPath);
+                s_fileBytes = 0;
+            }
+            s_flushMs = static_cast<float>((s_lastFlush - t0) / kTicksPerMs);
+        }
+
+        void Append(const std::string &line)
+        {
+            if (!s_rotated)
+                Rotate();
+            s_buf += line;
+            s_buf += '\n';
+            const u64 now = svcGetSystemTick();
+            // The first 60 s after boot go straight out (a crash while the
+            // title loads or the first world starts still leaves every line;
+            // v0.6.0 died at 13 s), then batches.
+            const bool early = now - s_bootTick < static_cast<u64>(60000.0 * kTicksPerMs);
+            if (early || s_buf.size() > 6000 || now - s_lastFlush > static_cast<u64>(5000.0 * kTicksPerMs))
+                FlushBuffer();
+        }
+#else
         void Append(const std::string &line)
         {
             File f;
@@ -50,6 +117,7 @@ namespace t3d::perf
             f.WriteLine(line);
             f.Close();
         }
+#endif
 
         float Seconds()
         {
@@ -197,4 +265,36 @@ namespace t3d::perf
     }
 
     const char *LogPath() { return kLogPath; }
+#ifdef T3D_O3DS
+    void  FlushLog()    { FlushBuffer(); }
+    void  LogNow(const std::string &line) { Log(line); FlushBuffer(); }
+
+    void PanicWrite(const char *line)
+    {
+        // Any thread, from a panic path: this line, at once. The plugin
+        // thread's batch (at most ~5 s of per-second lines; the first 60 s
+        // are never batched) is left alone: touching that std::string from
+        // here would race with the plugin thread (audit).
+        static char ts[24];
+        snprintf(ts, sizeof(ts), "[%8.2f] ", Seconds());
+        File f;
+        if (File::Open(f, kLogPath, File::WRITE | File::CREATE | File::APPEND) != File::SUCCESS)
+            return;
+        f.Write(ts, strlen(ts));
+        f.Write(line, strlen(line));
+        f.Write("\n", 1);
+        f.Close();
+    }
+    void  ShiftTopDoneTick(u64 ticks)     { if (s_topDoneTick) s_topDoneTick += ticks; }
+    float LastFlushMs() { return s_flushMs; }
+
+    std::string FrameLine()
+    {
+        const Summary s = Last();
+        char buf[64];
+        snprintf(buf, sizeof(buf), "frame %.1fms avg %.1fms max",
+                 s.fpsAvg > 0 ? 1000.0f / s.fpsAvg : 0.0f, s.frameMsMax);
+        return buf;
+    }
+#endif
 }

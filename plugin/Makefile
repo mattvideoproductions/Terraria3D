@@ -59,7 +59,7 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 					-I$(CURDIR)/$(BUILD)
 export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
-.PHONY: all release debug clean
+.PHONY: all release debug o3ds clean
 
 all: release
 
@@ -70,13 +70,23 @@ release: | build/release
 		DEPSDIR=$(CURDIR)/build/release --no-print-directory \
 		-C build/release -f $(CURDIR)/Makefile
 
+# Old 3DS variant (v0.6.x): same source, -DT3D_O3DS=1 -> Terraria3D-o3ds.3gx
+# (T3D_EXTRA is empty for releases; emulator test builds pass e.g.
+#  T3D_EXTRA=-DT3D_TEST_SIM_LUMA_CHARGE)
+o3ds: | build/o3ds
+	@$(MAKE) BUILD=o3ds OUTPUT=$(CURDIR)/$(TARGET)-o3ds.3gx PSF=$(TARGET)-o3ds.plgInfo \
+		BUILD_LIBS="-lctrpf -lctru" WL=--strip-discarded,--strip-debug, \
+		BUILD_CFLAGS="-DNDEBUG=1 -DT3D_O3DS=1 -O2 -fomit-frame-pointer $(T3D_EXTRA)" \
+		DEPSDIR=$(CURDIR)/build/o3ds --no-print-directory \
+		-C build/o3ds -f $(CURDIR)/Makefile
+
 debug: | build/debug
 	@$(MAKE) BUILD=debug OUTPUT=$(CURDIR)/$(TARGET)-debug.3gx \
 		BUILD_LIBS="-lctrpfd -lctrud" BUILD_CFLAGS="-DDEBUG=1 -Og" G=-g \
 		DEPSDIR=$(CURDIR)/build/debug --no-print-directory \
 		-C build/debug -f $(CURDIR)/Makefile
 
-build/release build/debug:
+build/release build/debug build/o3ds:
 	@mkdir -p $@
 
 clean:

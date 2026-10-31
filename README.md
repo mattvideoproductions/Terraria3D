@@ -1,13 +1,24 @@
-# Terraria 3D (v0.5.5)
+# Terraria 3D (v0.5.5 New 3DS, v0.7.0 Old 3DS)
 
 A Luma3DS 3GX plugin that adds real per-layer stereoscopic 3D to Terraria on the
-Nintendo 3DS (New 3DS / New 2DS XL only).
+Nintendo 3DS. There are two builds: one for the New 3DS and one for the Old 3DS.
 
-> **A MattVidPro project.** Made for the [MattVidPro YouTube channel](https://www.youtube.com/@MattVidPro): Claude AI built it, and Matt directed and tested it on a real New 3DS.
+> **A MattVidPro project.** Made for the [MattVidPro YouTube channel](https://www.youtube.com/@MattVidPro): Claude AI built it, and Matt directed and tested it on a real New 3DS and Old 3DS.
 
-**In plain words:** this mod makes Terraria on your 3DS pop out in real 3D. The sky, the background walls, the blocks and the HUD each sit at their own depth, like looking into a little terrarium. It also adds better controls and smoother play. If your New 3DS already runs custom firmware (Luma3DS), installing it means copying one file to your SD card. **[Download it from the Releases page](https://github.com/mattvideoproductions/Terraria3D/releases/latest)**, then follow the Quick install steps below.
+**In plain words:** this mod makes Terraria on your 3DS pop out in real 3D. The sky, the background walls, the blocks and the HUD each sit at their own depth, like looking into a little terrarium. It also adds better controls and smoother play. If your 3DS already runs custom firmware (Luma3DS), installing it means copying one file to your SD card. Check which file you need below, download it, then follow the install steps.
 
-## Features
+## Which file do I need?
+
+| Your console | Download | Install guide |
+|---|---|---|
+| **New 3DS**, New 3DS XL, New 2DS XL | **[Terraria 3D v0.5.5](https://github.com/mattvideoproductions/Terraria3D/releases/latest)** (`Terraria3D.3gx`) | [INSTALL.md](INSTALL.md) |
+| **Old 3DS**, 3DS XL, 2DS (the originals) | **[Terraria 3D v0.7.0 for Old 3DS](https://github.com/mattvideoproductions/Terraria3D/releases/tag/o3ds-v0.7.0)** (`Terraria3D-Old3DS-v0.7.0.zip`) | [INSTALL_OLD_3DS.md](INSTALL_OLD_3DS.md) |
+
+Not sure which you have? A New 3DS has a small C-stick nub above the ABXY buttons and ZL / ZR buttons on the back. If yours doesn't, it's an Old 3DS. Use only one of the two files: both go in the same folder with the same name.
+
+The Old 3DS build has real layered 3D too, in a lighter form (4 depth layers), plus a 30 fps lock to keep it smooth. It uses the game's own controls, since the Old 3DS has no C-stick or ZL / ZR.
+
+## Features (New 3DS build)
 
 - Per-layer stereo 3D (sky, walls, tiles, particles and HUD at different depths)
 - Depth presets, default "Terrarium Window"
@@ -34,16 +45,16 @@ Nintendo 3DS (New 3DS / New 2DS XL only).
 
 ## Requirements
 
-- New Nintendo 3DS / New 2DS XL (Old 3DS is not supported) with Luma3DS v13.0 or newer
+- Any 3DS or 2DS with Luma3DS v13.0 or newer (pick the right build above)
 - Terraria, USA version (`000400000016A900`), updated to v5.6.0
 
-## Quick install
+## Quick install (New 3DS)
 
 1. Copy `Terraria3D.3gx` to `SD:/luma/plugins/000400000016A900/Terraria3D.3gx`.
 2. In the Rosalina menu (L + D-pad Down + SELECT), set "Plugin loader" to Enabled.
 3. Launch Terraria, then press SELECT for the mod menu.
 
-Full instructions, region notes and troubleshooting: see [INSTALL.md](INSTALL.md).
+Full instructions, region notes and troubleshooting: see [INSTALL.md](INSTALL.md). Old 3DS: see [INSTALL_OLD_3DS.md](INSTALL_OLD_3DS.md).
 
 ## Legal
 

@@ -44,4 +44,9 @@ namespace t3d::perf_fixes
     // spending a second tick catching up. Default OFF.
     void    SetNoCatchUp(bool on);
     bool    NoCatchUp();
+#ifdef T3D_O3DS
+    // Main object the backdrop pass last ran with (0 = never ran yet).
+    u32     DrawMain();
+    void    ClearDrawMain();          // game thread, out of a world
+#endif
 }

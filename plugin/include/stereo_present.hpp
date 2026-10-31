@@ -43,4 +43,8 @@ namespace t3d::stereo::present
     int     CurrentDisparity();         // rows, signed, as applied this frame
     u32     RightBufferAddr(int idx);
     bool    RightBuffersInFcram();
+#ifdef T3D_O3DS
+    // Old 3DS build: this frame shows a right eye (game thread, after OnPreTop).
+    bool    FrameStereo();
+#endif
 }

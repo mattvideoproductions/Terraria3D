@@ -91,6 +91,10 @@ namespace t3d::game
         0x001DED0C, // perf_fixes: backdrop cell draw calls + cave 0x1DEE7C
         0x00523CF4, // perf_fixes: backdrop visibility check (replaced)
         0x0050FAA4, // perf_fixes: GameState::Update tick loop back edge (no catch-up)
+#ifdef T3D_O3DS
+        0x001084F0, // o3ds: frame pacing slot (before WaitCmdlistDone + SwapBuffers)
+        0x00108804, // o3ds: display measure slot (after SwapBuffers)
+#endif
     };
 
     // Known locations from NOTES.md (v5.6.0 only)

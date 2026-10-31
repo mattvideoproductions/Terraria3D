@@ -34,6 +34,13 @@ namespace t3d::stereo::layers
     // Main thread, first displayed frame: create the right render target
     // while VRAM is still free (lazy creation failed on hardware in-world).
     void    ReserveRightTarget();
+#ifdef T3D_O3DS
+    // Old 3DS: the flat right-eye buffers were not reserved (2DS, opt-out,
+    // memory patch failed, allocation failed): never create the target.
+    void    RefuseRightTarget();
+    u32     RightTargetBytes();     // VRAM held by the right target (0 = none)
+    u32     RightTargetAddr();      // its colour buffer (0 = not created)
+#endif
 
     // Main thread, once per frame before the top screen is drawn.
     // `on` enables the right-eye pass for this frame (lazily creating and

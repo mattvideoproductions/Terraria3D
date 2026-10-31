@@ -16,6 +16,9 @@ extern "C" {
 #include "features.hpp"
 #include "perf.hpp"
 #include "ui_theme.hpp"
+#ifdef T3D_O3DS
+#include "o3ds.hpp"
+#endif
 
 // How it works (see notes/display_present.md):
 //
@@ -138,6 +141,13 @@ namespace t3d::stereo::present
             if (set.tried)
                 return set.ok;
             set.tried = true;
+#ifdef T3D_O3DS
+            // Old 3DS: only the title-screen reservation of set 0, which the
+            // device-heap patch pays for (o3ds::PatchGameMemory). Any later
+            // VRAM taken pushes game textures into a heap with no spare MiB.
+            if (&set != &s_sets[0] || s_state != State::Active)
+                return set.ok = false;
+#endif
             const int rows = kHeight + 2 * set.padRows;
 
             nngxActiveDisplay(kNngxDisplay0Ext);
@@ -195,9 +205,28 @@ namespace t3d::stereo::present
                 if (top.ids[0] != 0 && top.w == kWidth && top.h == kHeight)
                 {
                     s_state = State::Active;
+#ifdef T3D_O3DS
+                    // v0.6.1: the 607.5 KiB here displaces one 1 MiB atlas
+                    // page into the game's device heap; reserve only if that
+                    // heap got its extra MiB.
+                    if (!o3ds::GameMemoryOk() || !AllocateSet(s_sets[0]))
+                    {
+                        s_sets[0].tried = true;
+                        s_state = State::AllocFailed;
+                    }
+                    // v0.7.0: the cropped 240x400 per-layer target (375 KiB)
+                    // right after them, still inside that one displaced page.
+                    // Without the flat buffers it is never created, and the
+                    // menu and log show per-layer as unavailable at once.
+                    if (s_state == State::Active && o3ds::VramRoomForRightTarget(240u * 400u * 4u))
+                        layers::ReserveRightTarget();
+                    else
+                        layers::RefuseRightTarget();
+#else
                     if (!AllocateSet(s_sets[0]))
                         s_state = State::AllocFailed;
                     layers::ReserveRightTarget();
+#endif
                 }
             }
 
@@ -334,7 +363,11 @@ namespace t3d::stereo::present
             case State::NotInstalled:   return "not installed";
             case State::WaitingForGame: return "waiting (raise the 3D slider)";
             case State::Active:         return "active";
+#ifdef T3D_O3DS
+            case State::AllocFailed:    return o3ds::NoStereoReason() ? o3ds::NoStereoReason() : "right-eye buffer allocation failed";
+#else
             case State::AllocFailed:    return "right-eye buffer allocation failed";
+#endif
         }
         return "?";
     }
@@ -350,4 +383,7 @@ namespace t3d::stereo::present
     int  CurrentDisparity()         { return s_frameStereo ? s_disparity : 0; }
     u32  RightBufferAddr(int idx)   { return s_rightAddr[idx & 1]; }
     bool RightBuffersInFcram()      { return s_inFcram; }
+#ifdef T3D_O3DS
+    bool FrameStereo()              { return s_frameStereo; }
+#endif
 }

@@ -1281,7 +1281,11 @@ namespace t3d::ui_theme
         if (s_scanActive)
         {
             // 64 KiB per frame (at most ~16k uncached VRAM reads on hardware).
+#ifdef T3D_O3DS
+            if (ScanStep(0x8000))   // Old 3DS: half the budget (slower CPU, no L2)
+#else
             if (ScanStep(0x10000))
+#endif
             {
                 s_scanActive = false;
                 s_searched = true;

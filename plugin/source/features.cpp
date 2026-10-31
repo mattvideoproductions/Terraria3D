@@ -9,6 +9,13 @@
 
 using namespace CTRPluginFramework;
 
+#ifdef T3D_O3DS
+// Old 3DS build: the C-stick / ZL / ZR / ir:rst paths are compiled but never
+// reached (no hooks, no menu entries), so their helpers are unused here.
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#endif
+
 namespace t3d::features
 {
     namespace
@@ -200,12 +207,23 @@ namespace t3d::features
         // circle pad value and is hidden from the game (no D-pad cursor).
         volatile bool s_dpadWalk = false;
         bool          s_dpadWalking = false;
+#ifdef T3D_O3DS
+        // Old 3DS build: the "Old 3DS (D-pad + touch)" preset from the start,
+        // fixed (no C-stick, ZL/ZR stock, no ir:rst).
+        volatile int  s_cstickMode = kCstickOff;
+        volatile bool s_padInteractOnly = false;
+        volatile int  s_zlAction = kTrigDefault, s_zrAction = kTrigDefault;
+        volatile int  s_sensitivity = 1;
+        volatile int  s_smoothing = 2;
+        volatile int  s_preset = kPresetOld3DS;
+#else
         volatile int  s_cstickMode = kCstickAimAuto;
         volatile bool s_padInteractOnly = false;
         volatile int  s_zlAction = kTrigStyle, s_zrAction = kTrigUse;
         volatile int  s_sensitivity = 1;                // 0 low, 1 normal, 2 high
         volatile int  s_smoothing = 2;                  // 0 off, 1 light, 2 medium, 3 strong
         volatile int  s_preset = -1;                    // -1 = not chosen yet (auto-detect)
+#endif
         volatile s16  s_stickX = 0, s_stickY = 0;       // raw merged stick (game or ir:rst)
         volatile float s_smX = 0, s_smY = 0;            // smoothed stick: what aiming uses
         volatile s16  s_gameX = 0, s_gameY = 0;         // what the game's extra pad reported
@@ -1345,6 +1363,15 @@ namespace t3d::features
         static u32 s_polls = 0;
         s_polls++;
 
+#ifdef T3D_O3DS
+        if (s_polls == 31)
+        {
+            const bool isNew = DetectNew3DS();
+            perf::Log(Utils::Format("console: %s 3DS, Old 3DS build: preset %s (fixed)%s", isNew ? "New" : "Old",
+                                    kPresets[kPresetOld3DS].name,
+                                    isNew ? " - NOTE: this console should use the New 3DS build" : ""));
+        }
+#else
         // First run: choose the preset for this console (New 3DS: C-stick,
         // ZL, ZR; Old 3DS: D-pad cursor + touch).
         if (s_preset == -1 && s_polls > 30)
@@ -1375,6 +1402,7 @@ namespace t3d::features
             if (s_padCalls == 0)
                 MergeStick();   // no game-side read to merge in
         }
+#endif
 
         SyncPatch(e_infItems,   kInfiniteItems, s_appliedInfItems, "infinite items");
         SyncPatch(e_noFall,     kNoFallDamage,  s_appliedNoFall,   "no fall damage");
@@ -1401,6 +1429,15 @@ namespace t3d::features
         if (s_padHook.Install(kFnPadReadLatest, reinterpret_cast<void *>(Hooked_PadReadLatest), 0xE92D4070)
             != hook::Result::Ok)
             perf::Log("C-stick read hook NOT installed");
+#ifdef T3D_O3DS
+        // Old 3DS build: no C-stick aim, smart-cursor steering or private
+        // grapple button. Those hooks run many times per tick and would only
+        // pass through here, so they are not installed at all.
+        if (s_itemCheckHook.Install(kFnItemCheck, reinterpret_cast<void *>(Hooked_ItemCheck), 0xE92D4FF3)
+            != hook::Result::Ok)
+            perf::Log("item-check hook NOT installed");
+        perf::Log("Old 3DS build: C-stick, ZL/ZR remap and ir:rst are not installed");
+#else
         if (s_aimHook.Install(kFnGetAimPoint, reinterpret_cast<void *>(Hooked_GetAimPoint), 0xE92D4030)
             != hook::Result::Ok)
             perf::Log("aim hook NOT installed");
@@ -1415,10 +1452,14 @@ namespace t3d::features
                                                     0xE5D11000) == hook::Result::Ok;
         if (!s_buttonSetHooked)
             perf::Log("button-set hook NOT installed: grapple falls back to the trigger's own bit");
+#endif
     }
 
     std::string CstickStatus()
     {
+#ifdef T3D_O3DS
+        return Utils::Format("pad reads %lu (Old 3DS build: no C-stick)", s_padCalls);
+#endif
         return Utils::Format("cstick game %d,%d conn %d ir %s %d,%d reads %lu aims %lu",
                              s_gameX, s_gameY, s_padConnected, s_irActive ? "on" : "off",
                              s_irX, s_irY, s_padCalls, s_aimCalls);
@@ -1498,6 +1539,19 @@ namespace t3d::features
 
         // ---- Controls ----
         MenuFolder *controls = new MenuFolder("Controls");
+#ifdef T3D_O3DS
+        // Old 3DS build: D-pad cursor + touch (the game's own controls).
+        controls->Append(e_padInteract = new MenuEntry("Circle pad: interact only", NoOp,
+                                                       "The circle pad's auto-cursor still finds doors, chests\n"
+                                                       "and tables, but no longer mines or builds. Aim those with\n"
+                                                       "the D-pad cursor or touch. Off by default (it also stops\n"
+                                                       "an axe on Y chopping trees)."));
+        controls->Append(e_dpadWalk = new MenuEntry("D-pad walking", NoOp,
+                                                    "The D-pad moves your character like the circle pad\n"
+                                                    "while playing (menus keep the D-pad). Replaces the\n"
+                                                    "D-pad cursor. Off by default."));
+        menu.Append(controls);
+#else
         controls->Append(new MenuEntry("Control preset", nullptr, PresetMenuFunc,
                                        "New 3DS (C-stick aim), Old 3DS (D-pad + touch),\n"
                                        "Stock, or Lefty. Picked automatically on first boot\n"
@@ -1555,6 +1609,7 @@ namespace t3d::features
         controls->Append(e_cstickDebug = new MenuEntry("C-stick debug (bottom screen)", NoOp,
                                                        "Raw C-stick values from the game and from ir:rst."));
         menu.Append(controls);
+#endif
 
         // ---- Display ----
         menu.Append(new MenuEntry("Colour booster (fake OLED)", nullptr, ColorModeMenuFunc,

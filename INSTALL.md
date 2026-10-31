@@ -20,7 +20,8 @@ The mod contains no game files. You need your own legally owned copy of Terraria
 
 - A New 3DS / New 2DS XL running custom firmware with **Luma3DS v13.0 or newer**.
   The plugin loader is built into Luma3DS, so nothing else is needed.
-  - New 3DS only. Old 3DS is not supported.
+  - This guide is for the New 3DS. On an Old 3DS, Old 3DS XL or 2DS, follow
+    [INSTALL_OLD_3DS.md](INSTALL_OLD_3DS.md) instead.
 - **Terraria, USA version** (title ID `000400000016A900`), updated to **v5.6.0**
   (the latest update).
 

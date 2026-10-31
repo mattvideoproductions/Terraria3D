@@ -24,3 +24,7 @@ Build:
 devkitPro's make rules break on paths containing spaces, so `build.sh` builds through
 a space-free directory junction. Output: `Terraria3D.3gx`, which goes to
 `SD:/luma/plugins/000400000016A900/`.
+
+Old 3DS build: `./build.ps1 o3ds` (or `./build.sh o3ds`). It compiles the same source
+with `-DT3D_O3DS=1` and `Terraria3D-o3ds.plgInfo` (2 MiB plugin memory) into
+`Terraria3D-o3ds.3gx`. Rename it to `Terraria3D.3gx` on the SD card.
